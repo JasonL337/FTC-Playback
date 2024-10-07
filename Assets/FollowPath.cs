@@ -6,6 +6,12 @@ using UnityEngine;
 
 public class FollowPath : MonoBehaviour
 {
+    // HACK
+    double curAngle = 0;
+    //HACK
+    double prevAngle = 0;
+    // HACK
+    double lastAngleDiff = 0;
     double progress = 0;
     public Transform arrow;
     public double curPos = 0;
@@ -24,10 +30,18 @@ public class FollowPath : MonoBehaviour
     Vector2[] wayPointPoss;
     double[] thetas;
 
+    // Just the marker for the simulation.
+    public Transform markerTransform;
+    // This is the variable used for the simulation which the only reason I am instantiating this/creating an object
+    // is because I need to get the robot poisition which I will do with the localizer. This part on the robot will
+    // be a reference to the localizer.
+    public CreatePath createPath;
+
     
     // Start is called before the first frame update
     void Start()
-    {
+{        
+        // Just parses through the file and sets each waypoint's (starting at wp0) data to the various arrays
         String[] lines = File.ReadAllLines(@"C:\src\ftc\Venom2024-2025IntoTheDeep\Paths\PathTest.txt");
         int index = 0;
         dydxs = new double[lines.Length];
@@ -59,19 +73,15 @@ public class FollowPath : MonoBehaviour
             curString = curString.Remove(0, removePos + 1);
 
             String firstString = curString.Substring(0, curString.IndexOf(",") + 1);
-            Debug.Log(firstString);
-            startPos = Mathf.Max(firstString.IndexOf(":") + 2, firstString.IndexOf("-") + 1);
-            Debug.Log(startPos);
-            int commaPos = firstString.IndexOf(",");
-            // HACK
-            double posX = 0;//double.Parse(firstString.Substring(startPos + 2, commaPos - startPos - 1));
+            startPos = Mathf.Max(firstString.IndexOf(":") + 2, firstString.IndexOf("-"));
+            int commaPos = firstString.IndexOf(",") + 1;
+            double posX = 0;
+            posX = double.Parse(firstString.Substring(startPos, commaPos - startPos - 1));
+
             curString = curString.Remove(0, commaPos + 1);
 
-            commaPos = Mathf.Max(curString.IndexOf(",") + 2, curString.IndexOf("-") + 1);
             removePos =  curString.IndexOf(";");
-            startPos = Mathf.Max(curString.IndexOf(",") + 2, curString.IndexOf("-") + 1);
-            //HACK
-            double posY = 0;//double.Parse(curString.Substring(2, removePos - commaPos - 2));
+            double posY = double.Parse(curString.Substring(0, removePos - 1));
 
             wayPointPoss[index] = new Vector2((float)posX, (float)posY);
             index++;
@@ -106,6 +116,19 @@ public class FollowPath : MonoBehaviour
         return numWPs;
     }
 
+    private double[] getIntersectOfTajectory(){
+        // Creating the localized field position. This is only for the simulation. There will be no "convert to"
+        // in the actual robot. This line will just be something like "getPosition".
+        Vector2 fieldPos = createPath.ConvertToInchesField(createPath.ConvertToNormalizedField(this.transform.position));
+        // Using the theta, this is the dydx of the cur line/traj.
+        double slope = 1 / Mathf.Tan((float)(curAngle * Mathf.Deg2Rad));
+        // Math to find the x and y intersection of the trajectory.
+        double[] intersect = new double[2];
+        intersect[0] = (fieldPos.y + fieldPos.x / (slope) - wayPointPoss[curWP].y + slope * wayPointPoss[curWP].x) / (1/slope + slope);
+        intersect[1] = wayPointPoss[curWP].y + slope * (intersect[0] - wayPointPoss[curWP].x);
+        return intersect;
+    }
+
     private double getWeightedAngle(){
         // Theta is the variable that is added on to each iteration and will be the final weighted angle.
         // DistRemaining is the ever changing distance the waypoints are from the robot, once DistRemaining exceeds
@@ -113,8 +136,10 @@ public class FollowPath : MonoBehaviour
         double theta = 0;
         double distRemaining = 0;
 
+        int lookAheadWPs = getNumWPsLookahead();
+
         // Loops through every waypoint that is within the look ahead distance
-        for (int i = curWP; i < curWP + getNumWPsLookahead(); i++)
+        for (int i = curWP; i < curWP + lookAheadWPs; i++)
         {
             
             // Length of line is literally the length of the line from the robot (if 1st iteration)
@@ -125,6 +150,7 @@ public class FollowPath : MonoBehaviour
             // to the current waypoint begin and end markers.
             double wp1 = totalDists[i] - curPos;
             double wp2 = totalDists[i + 1] - curPos;
+            double deltaTheta = doGimbleCalc(curAngle, thetas[i]);
 
             // If it's the first waypoint, the first waypoint distance is 0.
             if (i == curWP)
@@ -148,16 +174,28 @@ public class FollowPath : MonoBehaviour
             }
 
             // Doing the area of the trapezoid that encompases this area of the angle.
-            theta += lengthOfLine * thetas[i] * (((distRemaining - wp1) + (distRemaining - wp2)) / 2.0);
+            theta += lengthOfLine * deltaTheta * (((combinedDist - wp1) + (combinedDist - wp2)) / 2.0);
         }
                     
         theta = theta / (Math.Pow(combinedDist, 2) / 2.0);
-        return theta;
+        return theta + curAngle;
     }
 
+    // Simple gimble calculation (returns difference in angles) where clockwise change is positive.
+    private double doGimbleCalc(double prevAngle, double curAngle)
+    {
+        if (curAngle - prevAngle > 180)
+            return curAngle - prevAngle - 360;
+        if (curAngle - prevAngle < -180)
+            return prevAngle - curAngle + 360;
+        return curAngle - prevAngle;
+    }
+
+    // Calculates the current waypoint it is at depending on the curPos which is the perpendicular line interseciton with the current
+    // trajectory.
     private void calcProgress() {
         progress = curPos / totalDists[totalDists.Length - 1];
-        for (int wp = curWP; wp < totalDists.Length - curWP; wp++) {
+        for (int wp = curWP; wp < totalDists.Length - 1; wp++) {
             if (Input.GetKey(KeyCode.P))
             {
                 Debug.Log("curwp " + curWP);
@@ -172,12 +210,41 @@ public class FollowPath : MonoBehaviour
         }
     }
 
+    private double getDistToWP(double[] intersect)
+    {
+        return Math.Sqrt(Math.Pow(intersect[0] - wayPointPoss[curWP].x, 2) + Math.Pow(intersect[1] - wayPointPoss[curWP].y, 2));
+    }
+
     // Update is called once per frame 
     void Update()
     {
+        // Hack for quickly and consistently increasing the position of the robot
+        if (Input.GetKey(KeyCode.F))
+            curPos += Time.deltaTime * 8;
+
+
+        // Hack for printing the intersection and the distance to the line.
+        if (Input.GetKey(KeyCode.D))
+        {
+            double[] intersect = getIntersectOfTajectory();
+            Debug.Log("intersect X " + intersect[0]);
+            Debug.Log("intersect Y " + intersect[1]);
+            Debug.Log("dist " + getDistToWP(intersect));
+            Vector3 markerWorldPos = createPath.ConvertToWorldPos(createPath.ConvertFromInchesField(new Vector2((float)intersect[0], (float)intersect[1])));
+            markerTransform.transform.position = new Vector3(markerWorldPos.x, markerWorldPos.y, 0f);
+        }
+
+        // Reread the file.
         if (Input.GetKeyDown(KeyCode.Space))
+        {
             Start();
-        arrow.transform.localEulerAngles = new Vector3(0, 0, 90f - (float)getWeightedAngle());
+        }
+
+        // Constantly setting the current angle of the trajector and alligning the arrow accordingly.
+        curAngle = getWeightedAngle();
+        arrow.transform.localEulerAngles = new Vector3(0, 0, 90f - (float)curAngle);
+
+
         //string path = @"C:\src\ftc\Venom2024-2025IntoTheDeep\Paths\PathTest.txt";
         /*
         Requirements:

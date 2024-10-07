@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Windows;
 
 public class CreatePath : MonoBehaviour
 {
@@ -32,7 +31,7 @@ public class CreatePath : MonoBehaviour
 
 
 
-    private Vector2 ConvertToWorldPos(Vector2 normFieldPos) {
+    public Vector2 ConvertToWorldPos(Vector2 normFieldPos) {
         float angleInRad = Mathf.Deg2Rad * fieldPos.transform.localEulerAngles.z;
         float posX = fieldPos.transform.position.x;
         float posY = fieldPos.transform.position.y;
@@ -49,7 +48,7 @@ public class CreatePath : MonoBehaviour
 
 
 
-    private Vector2 ConvertToNormalizedField(Vector2 worldPos)
+    public Vector2 ConvertToNormalizedField(Vector2 worldPos)
     {
         // Creating a centralized worldPos to be used in case there is a translation in the fieldPos so no matter
         // where it is, it's always in relation to the center of the field.
@@ -57,8 +56,8 @@ public class CreatePath : MonoBehaviour
 
         // scaleX and scaleY are the shurnken or expanded i hat and j hat without any other transformations. 
         // Could be added as one full transformation with a shrink/expand plus rotation but it's prettier this way.
-        float scaleX = 1/(fieldPos.transform.localScale.x * 1.13f);
-        float scaleY = 1/(fieldPos.transform.localScale.y * 1.13f);
+        float scaleX = 1/(fieldPos.transform.localScale.x * 1.235f);
+        float scaleY = 1/(fieldPos.transform.localScale.y * 1.235f);
         float angleInRad = Mathf.Deg2Rad * fieldPos.transform.localEulerAngles.z;
 
         // iPrime and jPrime transformations by rotation and scaling and then applying to the centralizedWorldPos.
@@ -68,15 +67,24 @@ public class CreatePath : MonoBehaviour
         return new Vector2(centralizedWorldPos.x * iPrime.x + centralizedWorldPos.y * jPrime.x, centralizedWorldPos.x * iPrime.y + centralizedWorldPos.y * jPrime.y);
     }
 
-
-
-
-
-    private Vector2 ConvertToInchesField(Vector2 normFieldPos)
+    public Vector2 ConvertFromInchesField(Vector2 inchFieldPos)
     {
         // 77 inches per side of the map, so converting normalized field position to inches.
-        Vector2 iPrime = new Vector2(77, 0);
-        Vector2 jPrime = new Vector2(0, 77);
+        Vector2 iPrime = new Vector2(1/72.0f, 0);
+        Vector2 jPrime = new Vector2(0, 1/72.0f);
+
+        return new Vector2(inchFieldPos.x * iPrime.x + inchFieldPos.y * jPrime.x, inchFieldPos.x * iPrime.y + inchFieldPos.y * jPrime.y);
+    }
+
+
+
+
+
+    public Vector2 ConvertToInchesField(Vector2 normFieldPos)
+    {
+        // 77 inches per side of the map, so converting normalized field position to inches.
+        Vector2 iPrime = new Vector2(72, 0);
+        Vector2 jPrime = new Vector2(0, 72);
 
         return new Vector2(normFieldPos.x * iPrime.x + normFieldPos.y * jPrime.x, normFieldPos.x * iPrime.y + normFieldPos.y * jPrime.y);
     }
@@ -109,7 +117,6 @@ public class CreatePath : MonoBehaviour
             // Converting worldspace to normalized space and inch-"ized" space on the field.
             Vector2 normFieldPos = ConvertToNormalizedField(worldPosition);
             Vector2 truePos = ConvertToInchesField(normFieldPos);
-            //Debug.Log(truePos);
 
             // Finding change in x in inches and change in y in inches from the previous point.
             float deltaX = truePos.x - oldPos.x;

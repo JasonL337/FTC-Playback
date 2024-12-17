@@ -35,8 +35,10 @@ public class WayPoint
         float posNeg = Mathf.Sign((nextPos.y - this.fieldPos.y) / (nextPos.x - this.fieldPos.x));
         dydxToNext = Mathf.Min(Mathf.Abs(nextPos.y - this.fieldPos.y) / Mathf.Abs(nextPos.x - this.fieldPos.x), 1000) * posNeg;
         yInt = dydxToNext * (-fieldPos.x) + fieldPos.y;
-        if (dydxToNext == 1000 || dydxToNext == -1000)
-            thetaToVert = 0;
+        if ((dydxToNext == 1000 || dydxToNext == -1000) && nextPos.y < this.fieldPos.y)
+        {
+            thetaToVert = 180 * Math.Sign(dydxToNext);
+        }
         else
         {
             if (Mathf.Sign(nextPos.x - this.fieldPos.x) > 0)

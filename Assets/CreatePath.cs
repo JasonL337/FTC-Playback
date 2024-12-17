@@ -7,8 +7,8 @@ using UnityEngine;
 
 public class CreatePath : MonoBehaviour
 {
-
-    private LineRenderer lineRenderer;
+    // Create me a list of LineRenderers
+    private List<LineRenderer> lineRenderers;
     // The last position of the mouse
     private Vector2 oldPos;
     bool firstFrame = true;
@@ -18,12 +18,14 @@ public class CreatePath : MonoBehaviour
 
     public List<WayPoint> wayPoints = new List<WayPoint>();
     float totalDist = 0;
+    int curRend = -1;
 
    // public Vector2[]
     // Start is called before the first frame update
     void Start()
     {
-        lineRenderer = GetComponent<LineRenderer>();
+        lineRenderers = new List<LineRenderer>();
+        createLineRenderer();
         wayPoints = new List<WayPoint>();
     }
 
@@ -35,10 +37,10 @@ public class CreatePath : MonoBehaviour
         float angleInRad = Mathf.Deg2Rad * fieldPos.transform.localEulerAngles.z;
         float posX = fieldPos.transform.position.x;
         float posY = fieldPos.transform.position.y;
-        Vector2 iPrime = new Vector2(fieldPos.transform.localScale.x * 1.13f * Mathf.Cos(angleInRad), 
-                                     fieldPos.transform.localScale.x * 1.13f * Mathf.Sin(angleInRad));
-        Vector2 jPrime = new Vector2(fieldPos.transform.localScale.y * 1.13f * Mathf.Cos(angleInRad + 90 * Mathf.Deg2Rad), 
-                                     fieldPos.transform.localScale.y * 1.13f * Mathf.Sin(angleInRad + 90 * Mathf.Deg2Rad));
+        Vector2 iPrime = new Vector2(fieldPos.transform.localScale.x / 1.235f * 1.13f * Mathf.Cos(angleInRad), 
+                                     fieldPos.transform.localScale.x / 1.235f * 1.13f * Mathf.Sin(angleInRad));
+        Vector2 jPrime = new Vector2(fieldPos.transform.localScale.y / 1.235f * 1.13f * Mathf.Cos(angleInRad + 90 * Mathf.Deg2Rad), 
+                                     fieldPos.transform.localScale.y / 1.235f * 1.13f * Mathf.Sin(angleInRad + 90 * Mathf.Deg2Rad));
 
         return new Vector2(normFieldPos.x * iPrime.x + normFieldPos.y * jPrime.x + posX, normFieldPos.x * iPrime.y + normFieldPos.y * jPrime.y + posY);
     }
@@ -48,7 +50,7 @@ public class CreatePath : MonoBehaviour
 
 
 
-    public Vector2 ConvertToNormalizedField(Vector2 worldPos)
+    public Vector2 ConvertToNormalizedField(Vector2 worldPos, bool isLocalPos)
     {
         // Creating a centralized worldPos to be used in case there is a translation in the fieldPos so no matter
         // where it is, it's always in relation to the center of the field.
@@ -56,8 +58,13 @@ public class CreatePath : MonoBehaviour
 
         // scaleX and scaleY are the shurnken or expanded i hat and j hat without any other transformations. 
         // Could be added as one full transformation with a shrink/expand plus rotation but it's prettier this way.
-        float scaleX = 1/(fieldPos.transform.localScale.x * 1.235f);
-        float scaleY = 1/(fieldPos.transform.localScale.y * 1.235f);
+        float scaleX = 1/(fieldPos.transform.localScale.x * 1.13f);
+        float scaleY = 1/(fieldPos.transform.localScale.y * 1.13f);
+        if (isLocalPos)
+        {
+            scaleX *= 1.235f;
+            scaleY *= 1.235f;
+        }
         float angleInRad = Mathf.Deg2Rad * fieldPos.transform.localEulerAngles.z;
 
         // iPrime and jPrime transformations by rotation and scaling and then applying to the centralizedWorldPos.
@@ -69,7 +76,7 @@ public class CreatePath : MonoBehaviour
 
     public Vector2 ConvertFromInchesField(Vector2 inchFieldPos)
     {
-        // 77 inches per side of the map, so converting normalized field position to inches.
+        // 72 inches per side of the map, so converting normalized field position to inches.
         Vector2 iPrime = new Vector2(1/72.0f, 0);
         Vector2 jPrime = new Vector2(0, 1/72.0f);
 
@@ -96,14 +103,14 @@ public class CreatePath : MonoBehaviour
     {
 
         // Loop through each point in the LineRenderer
-        for (int i = 0; i < lineRenderer.positionCount; i++)
+        for (int i = 0; i < lineRenderers[curRend].positionCount; i++)
         {
             // Creating the newPos of each waypoint using ConvertToWorldPos.
             Vector3 normFieldPos = wayPoints[i].normFieldPos;
             Vector3 newPos = ConvertToWorldPos(normFieldPos);//new Vector3(normFieldPos.x * iPrime.x + normFieldPos.y * jPrime.x + fieldPos.transform.position.x, normFieldPos.x * iPrime.y + normFieldPos.y * jPrime.y + fieldPos.transform.position.y, -.0001f);
             
             // Set the position of each point to newPos
-            lineRenderer.SetPosition(i, new Vector3(newPos.x, newPos.y, -.0001f));
+            lineRenderers[curRend].SetPosition(i, new Vector3(newPos.x, newPos.y, -.0001f));
         }
     }
 
@@ -115,7 +122,7 @@ public class CreatePath : MonoBehaviour
         if (!firstFrame)
         {
             // Converting worldspace to normalized space and inch-"ized" space on the field.
-            Vector2 normFieldPos = ConvertToNormalizedField(worldPosition);
+            Vector2 normFieldPos = ConvertToNormalizedField(worldPosition, false);
             Vector2 truePos = ConvertToInchesField(normFieldPos);
 
             // Finding change in x in inches and change in y in inches from the previous point.
@@ -127,9 +134,9 @@ public class CreatePath : MonoBehaviour
             if (dist > 1f)
             {
                 // Setting the waypoint
-                lineRenderer.positionCount++;
+                lineRenderers[curRend].positionCount++;
                 Vector3 linePos = new Vector3(worldPosition.x, worldPosition.y, fieldPos.position.z - .0001f);
-                lineRenderer.SetPosition(lineRenderer.positionCount - 1, linePos);
+                lineRenderers[curRend].SetPosition(lineRenderers[curRend].positionCount - 1, linePos);
 
                 totalDist += dist;
 
@@ -138,9 +145,9 @@ public class CreatePath : MonoBehaviour
                 wayPoints.Add(newWP);
 
                 // Checking if it's not the first waypoint, then set the previos one's "next" to the new one.
-                if (lineRenderer.positionCount != 1)
+                if (lineRenderers[curRend].positionCount != 1)
                 {
-                    wayPoints[lineRenderer.positionCount - 2].setNext(newWP);
+                    wayPoints[lineRenderers[curRend].positionCount - 2].setNext(newWP);
                 }
 
                 oldPos = truePos;
@@ -149,8 +156,8 @@ public class CreatePath : MonoBehaviour
         else
         {
             // Setting the first waypoint and setting the first "oldPos" to the first waypoint in terms of inches.
-            lineRenderer.SetPosition(0, new Vector3(worldPosition.x, worldPosition.y, fieldPos.position.z - .0001f));
-            Vector3 normFieldPos = ConvertToNormalizedField(worldPosition);
+            lineRenderers[curRend].SetPosition(0, new Vector3(worldPosition.x, worldPosition.y, fieldPos.position.z - .0001f));
+            Vector3 normFieldPos = ConvertToNormalizedField(worldPosition, false);
             oldPos = ConvertToInchesField(normFieldPos);
 
             // Creating the new waypoint as an object and adding it to the list of waypoints
@@ -169,6 +176,44 @@ public class CreatePath : MonoBehaviour
             vals[i] = "pos:" + i + ", " + wayPoints[i].toString();
         }
         System.IO.File.WriteAllLines(path, vals);
+    }
+
+    private void createLineRenderer()
+    {
+        curRend++;
+        GameObject newGameObject = new GameObject("Path " + (curRend + 1));
+        LineRenderer newLineRenderer = newGameObject.AddComponent<LineRenderer>();
+
+        // Setting the line renderer pretty/visual details.
+        if (newLineRenderer != null)
+        {
+            newLineRenderer.material = new Material(Shader.Find("Sprites/Default"));
+            newLineRenderer.widthMultiplier = .03f;
+            newLineRenderer.positionCount = 1;
+            int mod = curRend % 3;
+            newLineRenderer.startColor = new Color(mod * .5f, mod * .5f, mod * .5f);
+            Gradient gradient = new Gradient();
+            GradientColorKey[] colorKey = new GradientColorKey[2];
+            GradientAlphaKey[] alphaKey = new GradientAlphaKey[2];
+
+            // Set the color keys at the relative time 0 and 1 (0 is the start, 1 is the end)
+            colorKey[0].color = new Color(mod * .5f, mod * .5f, mod * .5f);
+            colorKey[0].time = 0.0f;
+            colorKey[1].color = new Color(mod * .5f, mod * .5f, mod * .5f);
+            colorKey[1].time = 1.0f;
+
+            // Set the alpha keys at the relative time 0 and 1
+            alphaKey[0].alpha = 1.0f;
+            alphaKey[0].time = 0.0f;
+            alphaKey[1].alpha = 0.0f;
+            alphaKey[1].time = 1.0f;
+
+            gradient.SetKeys(colorKey, alphaKey);
+
+            newLineRenderer.colorGradient = gradient;
+            newLineRenderer.endColor = new Color(mod * .5f, mod * .5f, mod * .5f);
+            lineRenderers.Add(newLineRenderer);
+        }
     }
 
     // Update is called once per frame
@@ -193,6 +238,11 @@ public class CreatePath : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.R))
         {
             ReallignWayPoints();
+        }
+
+        if (Input.GetKeyDown(KeyCode.B))
+        {
+            createLineRenderer();
         }
 
         if (Input.GetKeyDown(KeyCode.C))

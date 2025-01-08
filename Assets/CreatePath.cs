@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using Unity.IO.LowLevel.Unsafe;
 using UnityEditor;
 using UnityEngine;
 
@@ -16,17 +17,23 @@ public class CreatePath : MonoBehaviour
     public Transform cameraRot;
     public Transform fieldPos;
 
-    public List<WayPoint> wayPoints = new List<WayPoint>();
+    public List<List<WayPoint>> wayPoints = new List<List<WayPoint>>();
     float totalDist = 0;
     int curRend = -1;
+    String path = @"C:\src\ftc\Venom2024-2025IntoTheDeep\Paths\PathTest.txt";
+
+    FileHandler fileHandler = new FileHandler();
 
    // public Vector2[]
     // Start is called before the first frame update
     void Start()
     {
         lineRenderers = new List<LineRenderer>();
+        firstFrame = true;
+        //lineRenderers.Add(gameObject.GetComponent<LineRenderer>());
         createLineRenderer();
-        wayPoints = new List<WayPoint>();
+        wayPoints = new List<List<WayPoint>>();
+        wayPoints.Add(new List<WayPoint>());
     }
 
 
@@ -106,7 +113,7 @@ public class CreatePath : MonoBehaviour
         for (int i = 0; i < lineRenderers[curRend].positionCount; i++)
         {
             // Creating the newPos of each waypoint using ConvertToWorldPos.
-            Vector3 normFieldPos = wayPoints[i].normFieldPos;
+            Vector3 normFieldPos = wayPoints[curRend][i].normFieldPos;
             Vector3 newPos = ConvertToWorldPos(normFieldPos);//new Vector3(normFieldPos.x * iPrime.x + normFieldPos.y * jPrime.x + fieldPos.transform.position.x, normFieldPos.x * iPrime.y + normFieldPos.y * jPrime.y + fieldPos.transform.position.y, -.0001f);
             
             // Set the position of each point to newPos
@@ -117,6 +124,7 @@ public class CreatePath : MonoBehaviour
 
 
     private void setWayPoints(bool firstFrame, Vector3 worldPosition) {
+        Debug.Log(curRend);
         // If it's the first frame, you simply set the first position in the path/line to be where you click (can't connect
         // any points bc it's the first point) AND you set the first "oldPos" to be where on the field in inches you clicked.
         if (!firstFrame)
@@ -142,12 +150,12 @@ public class CreatePath : MonoBehaviour
 
                 // Creating the new waypoiny as an object and adding it to the list of waypoints
                 WayPoint newWP = new WayPoint(worldPosition, normFieldPos, truePos, totalDist, dist);
-                wayPoints.Add(newWP);
+                wayPoints[curRend].Add(newWP);
 
                 // Checking if it's not the first waypoint, then set the previos one's "next" to the new one.
                 if (lineRenderers[curRend].positionCount != 1)
                 {
-                    wayPoints[lineRenderers[curRend].positionCount - 2].setNext(newWP);
+                    wayPoints[curRend][lineRenderers[curRend].positionCount - 2].setNext(newWP);
                 }
 
                 oldPos = truePos;
@@ -162,32 +170,45 @@ public class CreatePath : MonoBehaviour
 
             // Creating the new waypoint as an object and adding it to the list of waypoints
             WayPoint newWP = new WayPoint(new Vector3(worldPosition.x, worldPosition.y, -.0001f), normFieldPos, oldPos, 0, 0);
-            wayPoints.Add(newWP);
+            wayPoints[curRend].Add(newWP);
+            firstFrame = false;
         }
     }
 
 
     private void compileWayPoints()
     {
-        string path = @"C:\src\ftc\Venom2024-2025IntoTheDeep\Paths\PathTest.txt";
+        fileHandler.MakeFileEmpty(path);
         //UnityEngine.Windows.Directory.roamingFolder;
-        String[] vals = new string[wayPoints.Count];
-        for (int i = 0; i < vals.Length; i++) {
-            vals[i] = "pos:" + i + ", " + wayPoints[i].toString();
+        List<String> vals = new List<String>();
+        for (int i = 0; i < wayPoints.Count; i++) {
+            for (int j = 0; j < wayPoints[i].Count; j++)
+            {
+                vals.Add("pos:" + j + ", " + wayPoints[i][j].toString());
+            }
+            vals.Add("BREAK");
         }
-        System.IO.File.WriteAllLines(path, vals);
+        fileHandler.WriteToFile(path, vals);
     }
 
     private void createLineRenderer()
     {
         curRend++;
+        wayPoints.Add(new List<WayPoint>());
         GameObject newGameObject = new GameObject("Path " + (curRend + 1));
         LineRenderer newLineRenderer = newGameObject.AddComponent<LineRenderer>();
+        firstFrame = true;
 
         // Setting the line renderer pretty/visual details.
         if (newLineRenderer != null)
         {
-            newLineRenderer.material = new Material(Shader.Find("Sprites/Default"));
+            //Material lineMaterial = new Material(Shader.Find("Sprites/Default"));
+            //lineMaterial.renderQueue = 3000;
+            //newLineRenderer.material = lineMaterial;
+            newLineRenderer.shadowBias = 0;
+            newLineRenderer.receiveShadows = false;
+            newLineRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            newLineRenderer.allowOcclusionWhenDynamic = false;
             newLineRenderer.widthMultiplier = .03f;
             newLineRenderer.positionCount = 1;
             int mod = curRend % 3;
@@ -223,6 +244,7 @@ public class CreatePath : MonoBehaviour
         if (Input.GetMouseButton(0)){
 
             // Converting screen to world positon using Unity.
+            // THIS COULD BE A FIX BY NOT INCLUDING THE Z IN THE SCREEN POSITION.
             Vector3 screenPosition = new Vector3(Input.mousePosition.x, Input.mousePosition.y, fieldPos.position.z - cameraPos.position.z);
             Vector3 worldPosition = Camera.main.ScreenToWorldPoint(screenPosition);
             

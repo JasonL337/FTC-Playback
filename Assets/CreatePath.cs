@@ -194,6 +194,8 @@ public class CreatePath : MonoBehaviour
     private void createLineRenderer()
     {
         curRend++;
+        totalDist = 0;
+        oldPos = new Vector2(0, 0);
         wayPoints.Add(new List<WayPoint>());
         GameObject newGameObject = new GameObject("Path " + (curRend + 1));
         LineRenderer newLineRenderer = newGameObject.AddComponent<LineRenderer>();

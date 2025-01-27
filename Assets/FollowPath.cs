@@ -7,6 +7,7 @@ using UnityEngine;
 
 public class FollowPath : MonoBehaviour
 {
+    double prevTime = 0;
     // HACK
     double curAngle = 0;
     //HACK
@@ -37,6 +38,14 @@ public class FollowPath : MonoBehaviour
     List<List<Vector2>> wayPointPoss;
     List<List<double>> thetas;
 
+
+    // These are all the lists of the current trajectory it is on.
+    List<double> curDydxs;
+    List<double> curDists;
+    List<double> curTotalDists;
+    List<Vector2> curWayPointPoss;
+    List<double> curThetas;
+
     // The current trajectory number it is on.
     int TrajNumber = 0;
 
@@ -58,7 +67,7 @@ public class FollowPath : MonoBehaviour
     public static double DCONST = .1;
     double prevError = 0;
     bool activeFollower = false;
-    int trajectoryNumber = 1;
+    int trajectoryNumber = 0;
 
 
     
@@ -74,6 +83,14 @@ public class FollowPath : MonoBehaviour
         totalDists = new List<List<double>>();
         wayPointPoss = new List<List<Vector2>>();
         thetas = new List<List<double>>();
+
+        dydxs.Add(new List<double>());
+        dists.Add(new List<double>());
+        totalDists.Add(new List<double>());
+        wayPointPoss.Add(new List<Vector2>());
+        thetas.Add(new List<double>());
+
+        curWP = 0;
         curPos = 0;
         prevPos = 0;
         prevError = 0;
@@ -86,33 +103,36 @@ public class FollowPath : MonoBehaviour
             // If it reaches a BREAK in the file, it creates the current trajectory to increase and to add a new list of points to the lists.
             if (curString.Equals("BREAK"))
             {
-                dydxs.Add(new List<double>());
-                dists.Add(new List<double>());
-                totalDists.Add(new List<double>());
-                wayPointPoss.Add(new List<Vector2>());
-                thetas.Add(new List<double>());
-                curTraj++;
-                index = 0;
+                if (index != lines.Length - 1)
+                {
+                    dydxs.Add(new List<double>());
+                    dists.Add(new List<double>());
+                    totalDists.Add(new List<double>());
+                    wayPointPoss.Add(new List<Vector2>());
+                    thetas.Add(new List<double>());
+                    curTraj++;
+                }
+                index++;
                 continue;
             }
             int removePos = curString.IndexOf(";");
             int startPos = curString.IndexOf("dYdX:");
-            dydxs[curTraj][index] = double.Parse(curString.Substring(startPos + 5, removePos - startPos - 5));
+            dydxs[curTraj].Add(double.Parse(curString.Substring(startPos + 5, removePos - startPos - 5)));
             curString = curString.Remove(0, removePos + 1);
 
             removePos =  curString.IndexOf(";");
             startPos = curString.IndexOf(":");
-            totalDists[curTraj][index] = double.Parse(curString.Substring(startPos + 1, removePos - startPos - 1));
+            totalDists[curTraj].Add(double.Parse(curString.Substring(startPos + 1, removePos - startPos - 1)));
             curString = curString.Remove(0, removePos + 1);
 
             removePos =  curString.IndexOf(";");
             startPos = curString.IndexOf(":");
-            dists[curTraj][index] = double.Parse(curString.Substring(startPos + 1, removePos - startPos - 1));
+            dists[curTraj].Add(double.Parse(curString.Substring(startPos + 1, removePos - startPos - 1)));
             curString = curString.Remove(0, removePos + 1);
 
             removePos =  curString.IndexOf(";");
             startPos = curString.IndexOf(":");
-            thetas[curTraj][index] = double.Parse(curString.Substring(startPos + 1, removePos - startPos - 1));
+            thetas[curTraj].Add(double.Parse(curString.Substring(startPos + 1, removePos - startPos - 1)));
             curString = curString.Remove(0, removePos + 1);
 
             String firstString = curString.Substring(0, curString.IndexOf(",") + 1);
@@ -126,17 +146,47 @@ public class FollowPath : MonoBehaviour
             removePos =  curString.IndexOf(";");
             double posY = double.Parse(curString.Substring(0, removePos - 1));
 
-            wayPointPoss[curTraj][index] = new Vector2((float)posX, (float)posY);
+            wayPointPoss[curTraj].Add(new Vector2((float)posX, (float)posY));
             index++;
-        }
+        } 
+
+        // Setting the current trajectory data to these lists here.
+        curDydxs = dydxs[trajectoryNumber];
+        curDists = dists[trajectoryNumber];
+        curTotalDists = totalDists[trajectoryNumber];
+        curWayPointPoss = wayPointPoss[trajectoryNumber];
+        curThetas = thetas[trajectoryNumber];
+
         prevIntersect = new double[]{wayPointPoss[0][0].x, wayPointPoss[0][0].y};
-        curAngle = getWeightedAngle();  
+        curAngle = getWeightedAngle(); 
+    }
+
+    // This is the number of trajectories in the path.
+    public int getTotalTrajectories()
+    {
+        return dydxs.Count;
     }
 
     // This increments the current trajectory it is on, called by the moverobot class (or the robot master in android studio)
     public void incrementTrajNumber()
     {
+        // Setting the current trajectory data to these lists here and incrementing the trajectory number.
         trajectoryNumber++;
+        curDydxs = dydxs[trajectoryNumber];
+        curDists = dists[trajectoryNumber];
+        curTotalDists = totalDists[trajectoryNumber];
+        curWayPointPoss = wayPointPoss[trajectoryNumber];
+        curThetas = thetas[trajectoryNumber];
+        activeFollower = true;
+        curWP = 0;
+        curPos = 0;
+        prevPos = 0;
+        prevError = 0;
+        combinedDist = 0;
+        prevIntersect = new double[]{wayPointPoss[trajectoryNumber][0].x, wayPointPoss[trajectoryNumber][0].y};
+        lookAheadDist = 10;
+        combinedDist = 0;
+        curAngle = getWeightedAngle(); 
     }
 
     // Based on the current position of the robot, get the number of waypoints that are between the robot and the max
@@ -146,20 +196,20 @@ public class FollowPath : MonoBehaviour
         calcProgress();
         combinedDist = 0;
         int numWPs = 0;
-        if (curPos > totalDists[trajectoryNumber][totalDists.Count - 1])
+        if (curPos > curTotalDists[curTotalDists.Count - 1])
         {
-            combinedDist = curPos - totalDists[trajectoryNumber][totalDists.Count - 1];
+            combinedDist = curPos - curTotalDists[curTotalDists.Count - 1];
             return 0;
         }
-        for (int i = curWP; i < totalDists[trajectoryNumber].Count - 1; i++)
+        for (int i = curWP; i < curTotalDists.Count - 1; i++)
         {
             if (i == curWP)
             {
-                combinedDist += dists[trajectoryNumber][i + 1] + totalDists[trajectoryNumber][i] - curPos;
+                combinedDist += curDists[i + 1] + curTotalDists[i] - curPos;
             }
             else
             {
-                combinedDist += dists[trajectoryNumber][i + 1];
+                combinedDist += curDists[i + 1];
             }
             if (combinedDist > lookAheadDist)
             {
@@ -179,9 +229,17 @@ public class FollowPath : MonoBehaviour
         // Using the theta, this is the dydx of the cur line/traj.
         double slope = getSlopeOfGrossTraj();
         // Math to find the x and y intersection of the trajectory.
+        if (trajectoryNumber != 0)
+        {
+           // Debug.Log("greater than 0");
+        }
         double[] intersect = new double[2];
-        intersect[0] = (fieldPos.y - wayPointPoss[trajectoryNumber][curWP].y + fieldPos.x / slope + slope * wayPointPoss[trajectoryNumber][curWP].x) / (1/slope + slope);
-        intersect[1] = wayPointPoss[trajectoryNumber][curWP].y + slope * (intersect[0] - wayPointPoss[trajectoryNumber][curWP].x);
+        if (curWP > curWayPointPoss.Count - 1)
+        {
+          //  Debug.Log("ERROR");
+        }
+        intersect[0] = (fieldPos.y - curWayPointPoss[curWP].y + fieldPos.x / slope + slope * curWayPointPoss[curWP].x) / (1/slope + slope);
+        intersect[1] = curWayPointPoss[curWP].y + slope * (intersect[0] - curWayPointPoss[curWP].x);
         return intersect;
     }
 
@@ -208,13 +266,13 @@ public class FollowPath : MonoBehaviour
 
 
 
-        if (curPos > totalDists[totalDists.Length - 1] || activeFollower == false)
+        if (curPos > curTotalDists[curTotalDists.Count - 1] || activeFollower == false)
         {
             activeFollower = false;
             Vector2 fieldPos = createPath.ConvertToInchesField(createPath.ConvertToNormalizedField(this.transform.position, true));
-            combinedDist = getGeneralDist(wayPointPoss[trajectoryNumber][wayPointPoss.Count - 1].x - fieldPos.x, fieldPos.y - wayPointPoss[trajectoryNumber][wayPointPoss.Count - 1].y);
-            double diffy = fieldPos.y - wayPointPoss[trajectoryNumber][wayPointPoss.Count - 1].y;
-            double diffx = fieldPos.x - wayPointPoss[trajectoryNumber][wayPointPoss.Count - 1].x;
+            combinedDist = getGeneralDist(curWayPointPoss[curWayPointPoss.Count - 1].x - fieldPos.x, fieldPos.y - curWayPointPoss[curWayPointPoss.Count - 1].y);
+            double diffy = fieldPos.y - curWayPointPoss[curWayPointPoss.Count - 1].y;
+            double diffx = fieldPos.x - curWayPointPoss[curWayPointPoss.Count - 1].x;
             theta = Math.Atan2(-diffx, -diffy) * Mathf.Rad2Deg;
             if (Input.GetKey(KeyCode.L))
             {
@@ -238,19 +296,19 @@ public class FollowPath : MonoBehaviour
                 
                 // Length of line is literally the length of the line from the robot (if 1st iteration)
                 // or this waypoint to the next waypoint.
-                double lengthOfLine = totalDists[i + 1] - totalDists[i];
+                double lengthOfLine = curTotalDists[i + 1] - curTotalDists[i];
 
                 // WP1 and 2 are the distances from the robot to the current waypoint begin and end markers.
                 // to the current waypoint begin and end markers.
-                double wp1 = totalDists[i] - curPos;
-                double wp2 = totalDists[i + 1] - curPos;
-                double deltaTheta = doGimbleCalc(curAngle, thetas[i]);
+                double wp1 = curTotalDists[i] - curPos;
+                double wp2 = curTotalDists[i + 1] - curPos;
+                double deltaTheta = doGimbleCalc(curAngle, curThetas[i]);
 
                 // If it's the first waypoint, the first waypoint distance is 0.
                 if (i == curWP)
                 {
                     wp1 = 0;
-                    lengthOfLine = totalDists[i + 1] - curPos;
+                    lengthOfLine = curTotalDists[i + 1] - curPos;
                 }
 
                 // Capping the length of the line if it is greater than the look ahead distance.
@@ -294,12 +352,12 @@ public class FollowPath : MonoBehaviour
 
     public double speedController()
     {
-        if (curPos >= totalDists[totalDists.Length - 1] - ENDPT_CONST || activeFollower == false)
+        if (curPos >= curTotalDists[curTotalDists.Count - 1] - ENDPT_CONST || activeFollower == false)
         {
             Vector2 fieldPos = createPath.ConvertToInchesField(createPath.ConvertToNormalizedField(this.transform.position, true));
             double PIDVal;
             double multiplier = Math.Abs(combinedDist / ENDPT_CONST * PCONST);
-            double error = getGeneralDist(wayPointPoss[wayPointPoss.Length - 1].x - fieldPos.x, wayPointPoss[wayPointPoss.Length - 1].y - fieldPos.y);
+            double error = getGeneralDist(curWayPointPoss[curWayPointPoss.Count - 1].x - fieldPos.x, curWayPointPoss[curWayPointPoss.Count - 1].y - fieldPos.y);
             double d = 0;
             if (prevError != 0)
             {
@@ -311,7 +369,44 @@ public class FollowPath : MonoBehaviour
         }
         else
         {
-            robotSpeed = 1;
+            double weightedSum = 0;
+            double remainingLookAheadDist = lookAheadDist;
+
+            for (int i = curWP; i < curWayPointPoss.Count - 1; i++)
+            {
+                Vector2 wp = curWayPointPoss[i];
+                Vector2 nextWp = curWayPointPoss[i + 1];
+
+                double angleDiff = Math.Abs(doGimbleCalc(curThetas[i], curAngle));
+                double segmentDist = curDists[i];
+
+                if (i == curWP)
+                {
+                    // Truncate the first segment distance
+                    segmentDist = curTotalDists[i + 1] - curPos;
+                }
+
+                if (remainingLookAheadDist < segmentDist)
+                {
+                    // Truncate the last segment distance
+                    segmentDist = remainingLookAheadDist;
+                }
+
+                weightedSum += angleDiff * segmentDist;
+                remainingLookAheadDist -= segmentDist;
+
+                if (remainingLookAheadDist <= 0)
+                {
+                    break;
+                }
+            }
+            if (remainingLookAheadDist <= 0)
+                weightedSum /= lookAheadDist;
+            else
+                weightedSum /= lookAheadDist - remainingLookAheadDist;
+            
+            Debug.Log("weighted sum " + weightedSum);
+            robotSpeed = Math.Pow(Math.E, -weightedSum / 60);
         }
         return robotSpeed;
         // My robot gets to a point which is within 2 inches or over the max distance and it starts to slow down based solely off of the trajectory
@@ -321,16 +416,11 @@ public class FollowPath : MonoBehaviour
     // Calculates the current waypoint it is at depending on the curPos which is the perpendicular line interseciton with the current
     // trajectory.
     private void calcProgress() {
-        progress = curPos / totalDists[totalDists.Length - 1];
+        progress = curPos / curTotalDists[curTotalDists.Count - 1];
         if (prevPos <= curPos)
         {
-            for (int wp = curWP; wp < totalDists.Length; wp++) {
-                if (Input.GetKey(KeyCode.P))
-                {
-                    Debug.Log("curwp " + curWP);
-                    Debug.Log("WP " + wp);
-                }
-                if (totalDists[wp] > curPos)
+            for (int wp = curWP; wp < curTotalDists.Count; wp++) {
+                if (curTotalDists[wp] > curPos)
                 {
                     curWP = Math.Max(wp - 1, 0);
                     break;
@@ -340,12 +430,7 @@ public class FollowPath : MonoBehaviour
         else
         {
             for (int wp = curWP; wp > -1; wp--) {
-                if (Input.GetKey(KeyCode.P))
-                {
-                    Debug.Log("curwp " + curWP);
-                    Debug.Log("WP " + wp);
-                }
-                if (totalDists[wp] < curPos)
+                if (curTotalDists[wp] < curPos)
                 {
                     curWP = wp;
                     break;
@@ -356,7 +441,7 @@ public class FollowPath : MonoBehaviour
 
     private double getDistToWP(double[] intersect)
     {
-        return Math.Sqrt(Math.Pow(intersect[0] - wayPointPoss[curWP].x, 2) + Math.Pow(intersect[1] - wayPointPoss[curWP].y, 2));
+        return Math.Sqrt(Math.Pow(intersect[0] - curWayPointPoss[curWP].x, 2) + Math.Pow(intersect[1] - curWayPointPoss[curWP].y, 2));
     }
 
     private void updatePos()
@@ -398,6 +483,10 @@ public class FollowPath : MonoBehaviour
     // Gets the normalized vector where x is the normalized x distance, y is the y, and z is the speed.
     public double[] getRobotTrajectory()
     {
+        if (Input.GetKeyDown(KeyCode.P))
+        {
+            Debug.Log("In");
+        }
         if (activeFollower)
         {
             Vector2 fieldPos = createPath.ConvertToInchesField(createPath.ConvertToNormalizedField(this.transform.position, true));
@@ -445,7 +534,8 @@ public class FollowPath : MonoBehaviour
 
     public bool isAtEnd()
     {
-        return Math.Abs(curPos - totalDists[totalDists.Length - 1]) <= 1;
+        Vector2 fieldPos = createPath.ConvertToInchesField(createPath.ConvertToNormalizedField(this.transform.position, true));
+        return getGeneralDist(fieldPos.x - curWayPointPoss[curWayPointPoss.Count - 1].x, fieldPos.y - curWayPointPoss[curWayPointPoss.Count - 1].y) < 2 && !activeFollower;//Math.Abs(curPos - curTotalDists[curTotalDists.Count - 1]) <= 1;
     }
 
     // Update is called once per frame 
@@ -472,15 +562,19 @@ public class FollowPath : MonoBehaviour
             Start();
         }
 
-        if (Input.GetKey(KeyCode.T))
+        if (Input.GetKey(KeyCode.T) && false)
         {
             double[] traj = getRobotTrajectory();
             Debug.Log(traj[0] + " is x and y is " + traj[1]);
         }
 
 
+        if (Time.time > prevTime + 1/30)
+        {
+            updatePos();
+            prevTime = Time.time;
+        }
         
-        updatePos();
 
 
         //string path = @"C:\src\ftc\Venom2024-2025IntoTheDeep\Paths\PathTest.txt";
